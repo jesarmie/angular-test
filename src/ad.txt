@@ -1,0 +1,49 @@
+
+        [Route("GetSupervisors")]
+        [HttpGet]
+        public List<string> GetSupervisors([FromQuery] string component, [FromQuery] string filter)
+        {
+            var supervisorCOI = _PersonService.GetSupervisorCOIByComponent(component);
+
+            var identityName = this.User.Identity.Name;
+            var domainName = Regex.Replace(identityName, "(.*)\\\\.*", "$1", RegexOptions.None);
+            var userName = Regex.Replace(identityName, ".*\\\\(.*)", "$1", RegexOptions.None);
+
+            List<string> supervisorsList = new List<string>();
+            PrincipalContext ctx = new PrincipalContext(ContextType.Domain, domainName);
+            GroupPrincipal grp = GroupPrincipal.FindByIdentity(ctx, IdentityType.SamAccountName, supervisorCOI);
+
+            if (grp != null)
+            {
+                string strActiveDirectoryHost = "LDAP://" + domainName;
+                var group = new DirectoryEntry($"LDAP://{domainName}/<GUID={grp.Guid}>", null, null, AuthenticationTypes.Secure);
+
+                using (group)
+                {
+                    DirectorySearcher ds = new DirectorySearcher(
+                        group,
+                        "(objectClass=user)",
+                        new string[] { "sAMAccountName", "name", "displayName", "givenName", "sn", "mail" },
+                        SearchScope.Base
+                        )
+                    {
+                        AttributeScopeQuery = "member",
+                        PageSize = 5000,
+                        SizeLimit = 5000
+                    };
+
+                    using (SearchResultCollection usersFound = ds.FindAll())
+                    {
+                        foreach (SearchResult userFound in usersFound)
+                        {
+                            if (userFound.Properties["displayName"] != null && userFound.Properties["displayName"].Count > 0 && userFound.Properties["displayName"][0].ToString().ToLower().StartsWith(filter.ToLower()))
+                            {
+                                supervisorsList.Add(userFound.Properties["displayName"][0].ToString());
+                            }
+                        }
+                    }
+                }
+
+            }
+            return supervisorsList.Distinct().OrderBy(s => s).ToList();            
+        }
